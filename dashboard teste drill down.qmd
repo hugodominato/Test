@@ -1,0 +1,87 @@
+---
+title: BRA - EUROCONTROL
+format: 
+  dashboard:
+    orientation: rows
+---
+
+
+
+```{r}
+install.packages("shinydashboard")
+# Carregar pacotes necessários
+library(shiny)
+library(readr)
+library(dplyr)
+library(plotly)
+library(lubridate)
+library(shinydashboard)
+
+# Funções para adicionar métricas adicionais (mantidas como no seu código original)
+add_dly_early_late_groupings <- function(.punc_df){
+  df <- .punc_df |>  
+    dplyr::mutate(
+        EARLY        = rowSums(across(.cols = `(-INF,-60]`:`(-20,-15]`), na.rm = TRUE) / N_VALID
+       ,EARLY_M15M05 = (`(-15,-10]` + `(-10,-5]`) / N_VALID
+       ,EARLY_M05M00 =  `(-5,0]`                  / N_VALID
+       ,LATE_P00P05  =  `(0,5)`                   / N_VALID
+       ,LATE_P05P15  = (`[5,10)` + `[10,15)`)     / N_VALID
+       ,LATE         = rowSums(across(.cols = `[15,20)`:`[60,INF)`), na.rm = TRUE) / N_VALID
+       ,WITHIN_M05P05= (`(-5,0]` + `(0,5)`)       / N_VALID
+       ,WITHIN_M15P15= (`(-15,-10]`+`(-10,-5]`+`(-5,0]`+`(0,5)`+`[5,10)`+`[10,15)`) / N_VALID
+    )
+}
+
+# Carregar e preparar os dados
+punc_bra <- read_csv("C:/Users/rdrodrig/dev/DECEA/2025/data_proc/BRA-punc.csv") |>  
+  mutate(REGION = "BRA") |> 
+  group_by(APT, PHASE, YEAR = lubridate::year(DATE), REGION, N_VALID) |> 
+  summarise(across(.cols = `(-INF,-60]`:`[60,INF)`, .fns = sum), .groups = "drop") |> 
+  add_dly_early_late_groupings()
+
+# Aeroportos
+airports <- c("SBBR","SBGR","SBSP","SBKP","SBRJ","SBGL","SBCF","SBSV","SBPA","SBCT")
+anos <- unique(punc_bra$YEAR)
+
+# UI
+ui <- dashboardPage(
+  dashboardHeader(title = "BRA - EUROCONTROL"),
+  dashboardSidebar(
+    selectInput("ano", "Selecione o Ano:", choices = anos, selected = max(anos)),
+    selectInput("aeroportos", "Selecione os Aeroportos:", choices = airports, selected = airports, multiple = TRUE)
+  ),
+  dashboardBody(
+    fluidRow(
+      box(
+        plotlyOutput("grafico_pontualidade")
+      )
+    )
+  )
+)
+
+# Server
+server <- function(input, output) {
+  output$grafico_pontualidade <- renderPlotly({
+    tmp <- punc_bra |> 
+      dplyr::filter(PHASE == "ARR", APT %in% input$aeroportos, YEAR == input$ano)
+    
+    plot_ly(
+      data = tmp,
+      x = ~YEAR,
+      y = ~WITHIN_M15P15,
+      color = ~APT,
+      type = 'scatter',
+      mode = 'lines+markers'
+    ) %>%
+      plotly::layout(
+        title = "Evolução da Pontualidade por Ano",
+        xaxis = list(title = "Ano"),
+        yaxis = list(title = "Pontualidade (%)", tickformat = ".0%"),
+        legend = list(title = list(text = "Aeroportos"))
+      )
+  })
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+```
